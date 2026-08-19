@@ -24,3 +24,53 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Login-page Hindi headline ticker */
+main:has(section.w-full.max-w-md) {
+  position: relative;
+  padding-top: 40px;
+}
+
+main:has(section.w-full.max-w-md)::before {
+  content: "🪙  “भारत में Flip (सिक्के) का नया अंदाज़।”  •  हर गेम में रोमांच, हर कदम पर भरोसा।  •  खेलिए • जीतिए • पाइए 2X इनाम + शानदार बोनस 🎁     🪙  “भारत में Flip (सिक्के) का नया अंदाज़।”  •  हर गेम में रोमांच, हर कदम पर भरोसा।  •  खेलिए • जीतिए • पाइए 2X इनाम + शानदार बोनस 🎁     🪙  “भारत में Flip (सिक्के) का नया अंदाज़।”  •  हर गेम में रोमांच, हर कदम पर भरोसा।  •  खेलिए • जीतिए • पाइए 2X इनाम + शानदार बोनस 🎁     🪙  “भारत में Flip (सिक्के) का नया अंदाज़।”  •  हर गेम में रोमांच, हर कदम पर भरोसा।  •  खेलिए • जीतिए • पाइए 2X इनाम + शानदार बोनस 🎁";
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: block;
+  width: max-content;
+  height: 40px;
+  line-height: 40px;
+  padding-left: 24px;
+  padding-right: 24px;
+  white-space: nowrap;
+  box-sizing: border-box;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fde047;
+  background: linear-gradient(
+    90deg,
+    rgba(234, 179, 8, 0.15),
+    rgba(250, 204, 21, 0.25),
+    rgba(234, 179, 8, 0.15)
+  );
+  border-bottom: 1px solid rgba(250, 204, 21, 0.3);
+  backdrop-filter: blur(12px);
+  animation: coinflip-hindi-marquee 32s linear infinite;
+  overflow: hidden;
+}
+
+@keyframes coinflip-hindi-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-25%);
+  }
+}
+
+@media (min-width: 640px) {
+  main:has(section.w-full.max-w-md)::before {
+    font-size: 14px;
+  }
+}
