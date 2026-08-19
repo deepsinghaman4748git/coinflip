@@ -1,0 +1,655 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+export default function GamePage() {
+  const [choice, setChoice] = useState("");
+  const [result, setResult] = useState(null);
+  const [coin, setCoin] = useState("\u{1FA99}");
+  const [loading, setLoading] = useState(false);
+  const [bet, setBet] = useState("");
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [flipping, setFlipping] = useState(false);
+  const [gameEnabled, setGameEnabled] = useState(true);
+  const [maintenance, setMaintenance] = useState(false);
+  const [minBet, setMinBet] = useState(10);
+  const [maxBet, setMaxBet] = useState(10000);
+  const [payoutMultiplier, setPayoutMultiplier] = useState(2);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  async function loadSettings() {
+    try {
+      setSettingsLoading(true);
+      const response = await fetch("/api/admin/settings", { cache: "no-store" });
+      const data = await response.json();
+
+      if (data.success && data.settings) {
+        setGameEnabled(Boolean(data.settings.CoinFlipEnabled));
+        setMaintenance(Boolean(data.settings.maintenanceMode));
+        setMinBet(Number(data.settings.minBet ?? 10));
+        setMaxBet(Number(data.settings.maxBet ?? 10000));
+        setPayoutMultiplier(Number(data.settings.payoutMultiplier ?? 2));
+      }
+    } catch (error) {
+      console.error("Game settings loading error:", error);
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function loadWallet() {
+    try {
+      const response = await fetch("/api/me", {
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.user) {
+        setWalletBalance(Number(data.user.walletBalance || 0));
+      }
+    } catch (error) {
+      console.error("Wallet loading error:", error);
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      setHistoryLoading(true);
+
+      const response = await fetch("/api/game/history", {
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setHistory(data.games || []);
+      }
+    } catch (error) {
+      console.error("Game history loading error:", error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSettings();
+    loadWallet();
+    loadHistory();
+  }, []);
+
+  function selectBet(amount) {
+    if (loading) return;
+    setBet(String(amount));
+    setResult(null);
+  }
+
+  async function flipCoin() {
+    if (loading) return;
+
+    if (!choice) {
+      alert("Please select HEAD or TAIL");
+      return;
+    }
+
+    if (!gameEnabled) {
+      alert("CoinFlip game is currently disabled.");
+      return;
+    }
+
+    if (maintenance) {
+      alert("CoinFlip is currently under maintenance.");
+      return;
+    }
+
+    const amount = Number(bet);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      alert("Enter a valid bet amount");
+      return;
+    }
+
+    if (amount < minBet) {
+      alert(`Minimum entry fee is Rs.${minBet}`);
+      return;
+    }
+
+    if (amount > maxBet) {
+      alert(`Maximum entry fee is Rs.${maxBet}`);
+      return;
+    }
+
+    if (amount > walletBalance) {
+      alert("Insufficient wallet balance");
+      return;
+    }
+
+    setLoading(true);
+    setFlipping(true);
+    setResult(null);
+    setCoin("\u{1FA99}");
+
+    try {
+      /*
+       * Animation only.
+       * Actual result comes from the SERVER.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+
+      const response = await fetch("/api/game/CoinFlip", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prediction: choice === "Head" ? "heads" : "tails",
+          entryFee: amount,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        alert(data.message || "Unable to play game");
+        setCoin("\u{1FA99}");
+        return;
+      }
+
+      const game = data.game;
+
+      const finalResult =
+        game.result === "heads" ? "HEAD" : "TAIL";
+
+      setCoin(finalResult === "HEAD" ? "\u{1F642}" : "\u{1F985}");
+
+      setResult({
+        won: game.status === "won",
+        prediction:
+          game.prediction === "heads" ? "HEAD" : "TAIL",
+        result: finalResult,
+        entryFee: Number(game.entryFee || 0),
+        winAmount: Number(game.winAmount || 0),
+      });
+
+      setWalletBalance(Number(data.walletBalance || 0));
+      setBet("");
+
+      await loadHistory();
+      await loadWallet();
+    } catch (error) {
+      console.error("CoinFlip error:", error);
+      alert("Something went wrong. Please try again.");
+      setCoin("\u{1FA99}");
+    } finally {
+      setFlipping(false);
+      setLoading(false);
+    }
+  }
+
+  function resetGame() {
+    if (loading) return;
+
+    setChoice("");
+    setResult(null);
+    setCoin("\u{1FA99}");
+    setBet("");
+  }
+
+  function formatDate(date) {
+    if (!date) return "-";
+
+    return new Date(date).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return (
+    <div className="min-h-screen bg-[#070B14] text-white px-4 py-6 md:py-10">
+
+      <div className="max-w-6xl mx-auto">
+
+        {/* TOP HEADER */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 mb-8">
+
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-2xl">
+                {"\u{1FA99}"}
+              </div>
+
+              <div>
+                <h1 className="text-3xl md:text-4xl font-black text-yellow-400">
+                  CoinFlip
+                </h1>
+
+                <p className="text-gray-500 text-sm">
+                  Heads or Tails
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* WALLET */}
+          <div className="bg-[#111827] border border-green-500/20 rounded-2xl px-6 py-4 min-w-[190px]">
+            <p className="text-gray-500 text-xs uppercase tracking-wider">
+              Wallet Balance
+            </p>
+
+            <p className="text-2xl font-black text-green-400 mt-1">
+              Rs.{walletBalance.toFixed(2)}
+            </p>
+          </div>
+
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-7">
+
+          {/* ================= GAME ================= */}
+
+          <div className="bg-[#111827] border border-white/5 rounded-3xl p-6 md:p-8 shadow-2xl">
+
+            <div className="text-center">
+
+              <span className="inline-block px-4 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-bold">
+                {payoutMultiplier}X PAYOUT
+              </span>
+
+              <h2 className="text-2xl font-bold mt-4">
+                Predict the Coin
+              </h2>
+
+              <p className="text-gray-500 text-sm mt-2">
+                Choose your side and enter your stake
+              </p>
+
+            </div>
+
+            {/* COIN */}
+
+            <div className="flex justify-center mt-8">
+
+              <div
+                className={`w-36 h-36 md:w-44 md:h-44 rounded-full bg-gradient-to-br from-yellow-300 via-yellow-500 to-yellow-700 border-8 border-yellow-200/20 shadow-[0_0_60px_rgba(234,179,8,0.18)] flex items-center justify-center ${
+                  flipping ? "animate-spin" : ""
+                }`}
+              >
+                <span className="text-7xl md:text-8xl">
+                  {coin}
+                </span>
+              </div>
+
+            </div>
+
+            <p className="text-center text-gray-500 mt-5 text-sm">
+              {loading
+                ? "Flipping the coin..."
+                : result
+                ? "Round completed"
+                : "Select HEAD or TAIL"}
+            </p>
+
+            {/* BET AMOUNT */}
+
+            <div className="mt-8">
+
+              <label className="text-gray-300 text-sm font-medium">
+                Entry Fee
+              </label>
+
+              <div className="relative mt-2">
+
+                <span className="absolute left-4 top-3.5 text-gray-400">
+                  Rs.
+                </span>
+
+                <input
+                  type="number"
+                  min="10"
+                  placeholder="Enter amount"
+                  value={bet}
+                  onChange={(e) => setBet(e.target.value)}
+                  disabled={loading}
+                  className="w-full bg-[#0B1120] border border-gray-700 focus:border-yellow-500 rounded-xl pl-9 pr-4 py-3.5 outline-none transition"
+                />
+
+              </div>
+
+              {/* QUICK BET */}
+
+              <div className="grid grid-cols-4 gap-2 mt-3">
+
+                {[10, 50, 100, 500].map((amount) => (
+                  <button
+                    key={amount}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => selectBet(amount)}
+                    className={`py-2 rounded-lg text-sm font-bold transition ${
+                      Number(bet) === amount
+                        ? "bg-yellow-500 text-black"
+                        : "bg-[#1F2937] hover:bg-gray-700 text-gray-300"
+                    }`}
+                  >
+                    Rs.{amount}
+                  </button>
+                ))}
+
+              </div>
+
+              <p className="text-xs text-gray-600 mt-2">
+                Minimum entry fee: Rs.{minBet} - Maximum: Rs.{maxBet}
+              </p>
+
+            </div>
+
+            {/* CHOICES */}
+
+            <div className="grid grid-cols-2 gap-4 mt-6">
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setChoice("Head")}
+                className={`py-5 rounded-2xl font-black text-lg transition border ${
+                  choice === "Head"
+                    ? "bg-yellow-500 text-black border-yellow-400 shadow-lg shadow-yellow-500/20"
+                    : "bg-[#1F2937] hover:bg-gray-700 border-gray-700"
+                }`}
+              >
+                {"\u{1F642}"} HEAD
+              </button>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setChoice("Tail")}
+                className={`py-5 rounded-2xl font-black text-lg transition border ${
+                  choice === "Tail"
+                    ? "bg-yellow-500 text-black border-yellow-400 shadow-lg shadow-yellow-500/20"
+                    : "bg-[#1F2937] hover:bg-gray-700 border-gray-700"
+                }`}
+              >
+                {"\u{1F985}"} TAIL
+              </button>
+
+            </div>
+
+            {/* PLAY BUTTON */}
+
+            <button
+              type="button"
+              onClick={flipCoin}
+              disabled={loading}
+              className="w-full mt-6 bg-green-500 hover:bg-green-600 active:scale-[0.99] disabled:bg-gray-700 disabled:text-gray-500 py-4 rounded-2xl font-black text-lg transition shadow-lg shadow-green-500/10"
+            >
+              {loading ? "\u{1FA99} Flipping..." : "\u{1F3AF} Flip Coin"}
+            </button>
+
+            {/* RESULT */}
+
+            {result && (
+              <div
+                className={`mt-6 rounded-2xl p-5 text-center border ${
+                  result.won
+                    ? "bg-green-500/10 border-green-500/30"
+                    : "bg-red-500/10 border-red-500/30"
+                }`}
+              >
+
+                <div className="text-3xl font-black">
+                  {result.won
+                    ? "\u{1F389} YOU WON!"
+                    : "\u{1F622} YOU LOST!"}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-5">
+
+                  <div className="bg-black/20 rounded-xl p-3">
+                    <p className="text-gray-500 text-xs">
+                      YOUR PICK
+                    </p>
+
+                    <p className="font-bold mt-1">
+                      {result.prediction}
+                    </p>
+                  </div>
+
+                  <div className="bg-black/20 rounded-xl p-3">
+                    <p className="text-gray-500 text-xs">
+                      RESULT
+                    </p>
+
+                    <p className="font-bold text-yellow-400 mt-1">
+                      {result.result}
+                    </p>
+                  </div>
+
+                </div>
+
+                <div className="mt-4 text-sm">
+
+                  <span className="text-gray-400">
+                    Entry: Rs.{result.entryFee.toFixed(2)}
+                  </span>
+
+                  <span className="mx-2 text-gray-600">
+                    -
+                  </span>
+
+                  <span
+                    className={
+                      result.won
+                        ? "text-green-400 font-bold"
+                        : "text-red-400 font-bold"
+                    }
+                  >
+                    {result.won
+                      ? `Payout: Rs.${result.winAmount.toFixed(2)}`
+                      : `Lost: Rs.${result.entryFee.toFixed(2)}`}
+                  </span>
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={resetGame}
+                  className="mt-5 px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-bold"
+                >
+                   Play Again
+                </button>
+
+              </div>
+            )}
+
+          </div>
+
+          {/* ================= HISTORY ================= */}
+
+          <div className="bg-[#111827] border border-white/5 rounded-3xl p-6 md:p-7">
+
+            <div className="flex items-center justify-between gap-3 mb-6">
+
+              <div>
+                <h2 className="text-2xl font-black text-yellow-400">
+                  Game History
+                </h2>
+
+                <p className="text-gray-500 text-sm mt-1">
+                  Your recent CoinFlip rounds
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={historyLoading}
+                onClick={() => {
+                  loadHistory();
+                  loadWallet();
+                }}
+                className="bg-[#1F2937] hover:bg-gray-700 px-4 py-2 rounded-xl text-sm font-bold"
+              >
+                 Refresh
+              </button>
+
+            </div>
+
+            {historyLoading ? (
+
+              <div className="text-center py-16 text-gray-500">
+                Loading history...
+              </div>
+
+            ) : history.length === 0 ? (
+
+              <div className="text-center py-16">
+
+                <div className="text-6xl">
+                  {"\u{1F3AE}"}
+                </div>
+
+                <p className="text-gray-400 mt-4 font-semibold">
+                  No games played yet
+                </p>
+
+                <p className="text-gray-600 text-sm mt-1">
+                  Your recent games will appear here
+                </p>
+
+              </div>
+
+            ) : (
+
+              <div className="space-y-3 max-h-[650px] overflow-y-auto pr-1">
+
+                {history.map((game) => {
+
+                  const won = game.status === "won";
+
+                  const prediction =
+                    game.prediction === "heads"
+                      ? "HEAD"
+                      : "TAIL";
+
+                  const gameResult =
+                    game.result === "heads"
+                      ? "HEAD"
+                      : "TAIL";
+
+                  return (
+                    <div
+                      key={game._id}
+                      className="bg-[#0B1120] rounded-2xl p-4 border border-gray-800 hover:border-gray-700 transition"
+                    >
+
+                      <div className="flex items-center justify-between gap-3">
+
+                        <div>
+
+                          <div className="flex items-center gap-2">
+
+                            <span className="font-black">
+                              {prediction}
+                            </span>
+
+                            <span className="text-gray-600">
+                              Ã¢â€ â€™
+                            </span>
+
+                            <span className="text-yellow-400 font-black">
+                              {gameResult}
+                            </span>
+
+                          </div>
+
+                          <p className="text-gray-600 text-xs mt-1">
+                            {formatDate(game.createdAt)}
+                          </p>
+
+                        </div>
+
+                        <div className="text-right">
+
+                          <p
+                            className={`font-black text-sm ${
+                              won
+                                ? "text-green-400"
+                                : "text-red-400"
+                            }`}
+                          >
+                            {won ? "WON" : "LOST"}
+                          </p>
+
+                          <p className="text-gray-500 text-sm">
+                            Rs.
+                            {Number(
+                              game.entryFee || 0
+                            ).toFixed(2)}
+                          </p>
+
+                        </div>
+
+                      </div>
+
+                      <div className="border-t border-gray-800 mt-3 pt-3 flex justify-between text-sm">
+
+                        <span className="text-gray-600">
+                          Payout
+                        </span>
+
+                        <span
+                          className={
+                            won
+                              ? "text-green-400 font-bold"
+                              : "text-gray-600"
+                          }
+                        >
+                          Rs.
+                          {Number(
+                            game.winAmount || 0
+                          ).toFixed(2)}
+                        </span>
+
+                      </div>
+
+                    </div>
+                  );
+                })}
+
+              </div>
+
+            )}
+
+          </div>
+
+        </div>
+
+        {/* INFO */}
+
+        <div className="mt-7 bg-[#111827] border border-yellow-500/10 rounded-2xl p-4 text-center">
+
+          <p className="text-gray-500 text-xs">
+            Minimum entry â‚¹{minBet} â€¢ Win payout {payoutMultiplier}Ã— entry fee
+          </p>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+
+
+
+
+
+

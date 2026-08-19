@@ -1,0 +1,255 @@
+import { NextResponse } from "next/server";
+import jwt from "jsonwebtoken";
+import connectDB from "../../../lib/db";
+import User from "../../../models/User";
+import Transaction from "../../../models/Transaction";
+import Game from "../../../models/Game";
+import GameSettings from "../../../../models/GameSettings";
+
+export async function POST(request) {
+  try {
+    const token = request.cookies.get("token")?.value;
+
+    if (!token) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please login first",
+        },
+        { status: 401 }
+      );
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    if (!decoded.userId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid authentication",
+        },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+
+    const prediction = body.prediction;
+    const entryFee = Number(body.entryFee);
+
+    if (!["heads", "tails"].includes(prediction)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid prediction",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!Number.isFinite(entryFee) || entryFee <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid entry fee",
+        },
+        { status: 400 }
+      );
+    }
+
+    await connectDB();
+
+    // Get current admin settings
+    let settings = await GameSettings.findOne();
+
+    if (!settings) {
+      settings = await GameSettings.create({
+        CoinFlipEnabled: true,
+        maintenanceMode: false,
+        minBet: 10,
+        maxBet: 10000,
+        payoutMultiplier: 2,
+      });
+    }
+
+    const minBet = Number(settings.minBet ?? 10);
+    const maxBet = Number(settings.maxBet ?? 10000);
+    const payoutMultiplier = Number(
+      settings.payoutMultiplier ?? 2
+    );
+
+    // Game enabled check
+    if (!settings.CoinFlipEnabled) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "CoinFlip game is currently disabled.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Maintenance check
+    if (settings.maintenanceMode) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "CoinFlip is currently under maintenance. Please try again later.",
+        },
+        { status: 503 }
+      );
+    }
+
+    // Minimum bet check
+    if (entryFee < minBet) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Minimum entry fee is â‚¹${minBet}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Maximum bet check
+    if (entryFee > maxBet) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Maximum entry fee is â‚¹${maxBet}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Payout validation
+    if (
+      !Number.isFinite(payoutMultiplier) ||
+      payoutMultiplier < 1
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid payout configuration.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // Atomically deduct entry fee
+    const user = await User.findOneAndUpdate(
+      {
+        _id: decoded.userId,
+        walletBalance: { $gte: entryFee },
+      },
+      {
+        $inc: {
+          walletBalance: -entryFee,
+        },
+      },
+      {
+        returnDocument: "after",
+      }
+    );
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Insufficient wallet balance",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Generate result on server
+    const result =
+      Math.random() < 0.5
+        ? "heads"
+        : "tails";
+
+    const won = prediction === result;
+
+    // Dynamic payout from admin settings
+    const winAmount = won
+      ? entryFee * payoutMultiplier
+      : 0;
+
+    // Add winnings
+    if (won) {
+      user.walletBalance += winAmount;
+      await user.save();
+    }
+
+    // Save game
+    const game = await Game.create({
+      user: user._id,
+      gameType: "CoinFlip",
+      prediction,
+      result,
+      entryFee,
+      winAmount,
+      status: won ? "won" : "lost",
+    });
+
+    // Entry transaction
+    await Transaction.create({
+      user: user._id,
+      type: "game_entry",
+      amount: entryFee,
+      status: "completed",
+      paymentMethod: "wallet",
+      note: "CoinFlip game entry",
+    });
+
+    // Winning transaction
+    if (won) {
+      await Transaction.create({
+        user: user._id,
+        type: "game_win",
+        amount: winAmount,
+        status: "completed",
+        paymentMethod: "wallet",
+        note: "CoinFlip winning payout",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: won
+          ? "Congratulations! You won."
+          : "You lost this round.",
+        game: {
+          id: game._id,
+          prediction,
+          result,
+          entryFee,
+          winAmount,
+          status: game.status,
+        },
+        walletBalance: user.walletBalance,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error(
+      "CoinFlip Game Error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Unable to play CoinFlip",
+        error: error.message,
+      },
+      { status: 500 }
+    );
+  }
+}
+

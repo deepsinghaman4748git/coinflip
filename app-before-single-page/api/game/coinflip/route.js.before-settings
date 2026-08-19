@@ -1,0 +1,180 @@
+﻿import { NextResponse } from "next/server";
+import jwt from "jsonwebtoken";
+import connectDB from "../../../lib/db";
+import User from "../../../models/User";
+import Transaction from "../../../models/Transaction";
+import Game from "../../../models/Game";
+import GameSettings from "../../../models/GameSettings";
+
+export async function POST(request) {
+  try {
+    const token = request.cookies.get("token")?.value;
+
+    if (!token) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please login first",
+        },
+        { status: 401 }
+      );
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    if (!decoded.userId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid authentication",
+        },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+
+    const prediction = body.prediction;
+    const entryFee = Number(body.entryFee);
+
+    if (!["heads", "tails"].includes(prediction)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid prediction",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!Number.isFinite(entryFee) || entryFee <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid entry fee",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (entryFee < 10) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Minimum entry fee is â‚¹10",
+        },
+        { status: 400 }
+      );
+    }
+
+    await connectDB();
+
+    // Atomically deduct entry fee
+    const user = await User.findOneAndUpdate(
+      {
+        _id: decoded.userId,
+        walletBalance: { $gte: entryFee },
+      },
+      {
+        $inc: {
+          walletBalance: -entryFee,
+        },
+      },
+      {
+        returnDocument: "after",
+      }
+    );
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Insufficient wallet balance",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Generate coin result on server
+    const result =
+      Math.random() < 0.5 ? "heads" : "tails";
+
+    const won = prediction === result;
+
+    // 2x payout
+    const winAmount = won ? entryFee * 2 : 0;
+
+    // Add winnings to wallet
+    if (won) {
+      user.walletBalance += winAmount;
+      await user.save();
+    }
+
+    // Save game
+    const game = await Game.create({
+      user: user._id,
+      gameType: "coinflip",
+      prediction,
+      result,
+      entryFee,
+      winAmount,
+      status: won ? "won" : "lost",
+    });
+
+    // Entry transaction
+    await Transaction.create({
+      user: user._id,
+      type: "game_entry",
+      amount: entryFee,
+      status: "completed",
+      paymentMethod: "wallet",
+      note: "CoinFlip game entry",
+    });
+
+    // Winning transaction
+    if (won) {
+      await Transaction.create({
+        user: user._id,
+        type: "game_win",
+        amount: winAmount,
+        status: "completed",
+        paymentMethod: "wallet",
+        note: "CoinFlip winning payout",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: won
+          ? "Congratulations! You won."
+          : "You lost this round.",
+        game: {
+          id: game._id,
+          prediction,
+          result,
+          entryFee,
+          winAmount,
+          status: game.status,
+        },
+        walletBalance: user.walletBalance,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("CoinFlip Game Error:", error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Unable to play CoinFlip",
+        error: error.message,
+      },
+      { status: 500 }
+    );
+  }
+}
+
